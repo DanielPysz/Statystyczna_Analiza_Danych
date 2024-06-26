@@ -1,0 +1,483 @@
+---
+title: "Projekt zaliczeniowy SAD"
+author: "Daniel Pysz 449010"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+# Zadanie 1 - Eksploracja
+
+Wczytanie danych:
+
+```{r}
+set.seed(449010)
+train_x <- read.csv("/home/pysz/X_train.csv")
+train_y <- read.csv("/home/pysz/y_train.csv")
+test_x <- read.csv("/home/pysz/X_test.csv")
+```
+
+Sprawdzenie czy dane są kompletne:
+
+```{r}
+sum(is.na(train_x))
+sum(is.na(train_y))
+sum(is.na(test_x))
+```
+
+Określenie typu wszystkich zmiennych:
+
+```{r}
+for (i in length(train_x)){
+     type <- typeof(train_x[,i])
+     if (type != "double"){
+         print(typeof[train_x[,i]])
+     }
+}
+for (i in length(train_y)){
+     type <- typeof(train_y[,i])
+     if (type != "double"){
+         print(typeof[train_y[,i]])
+     }
+}
+for (i in length(test_x)){
+     type <- typeof(test_x[,i])
+     if (type != "double"){
+         print(typeof[test_x[,i]])
+     }
+}
+```
+
+Podstawowe statystyki opisowe zmiennej objaśnianej:
+
+```{r}
+summary(train_y)
+plot(ecdf(train_y$CD36), main='Dystrybuanta empiryczna')
+plot(density(train_y$CD36), main='Jądrowy estymator gęstości dla antygenu CD36')
+length(train_y$CD36[train_y$CD36>0])
+```
+
+Heatmapa dla 25 najbardziej skorelowanych zmiennych z CD36. Wykres
+wykonałem dla 25 zmiennych, a nie dla 250 jak było w instrukcji ze
+względu na jego większą czytelność.
+
+```{r}
+library(dplyr)
+not_y <- train_x
+y <- train_y$CD36
+
+corelaction <- rep(0, 8999)
+for (i in seq(1, length(not_y))){
+  corelaction[i] = cor(y, not_y[,i])
+}
+
+quant <- quantile(abs(corelaction), (8999-25)/8999)
+
+cor_columns <- c()
+for (i in seq_along(colnames(not_y))){
+  if (abs(corelaction[i])>(quant)){
+    cor_columns <- c(cor_columns, colnames(not_y)[i])
+  }
+}
+library(reshape2)
+library(ggplot2)
+heatmap_df <- select(train_x, c(cor_columns, CD36))
+heatmap_cor_df <- cor(heatmap_df)
+heatmap_melt_df <- melt(heatmap_cor_df)
+ggplot(data = heatmap_melt_df, aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile()
+```
+
+### Komentarz do zadania 1:
+
+Dostarczony zbiór treningowy zawiera 6800 obserwacji o 9000 różnych
+parametrach, z których każdy parametr jest wartością liczbową. Zbiór testowy (X_test) zawiera 1200 obserwacji i 9000 parametrów. Dane treningowe i testowe są kompletne. Najbardziej skorelowaną zmienną ze zmienną objaśnianą jest BLVRB o współczynniku korelacji 0.62
+
+Zmienna objaśniana (CD36) wykazuje średnią ekspresję wynoszącą 1.0862
+
+# Zadanie 2 - Testy statystyczne
+
+## Podpunkt a
+
+```{r}
+ggplot(train_y, aes(sample=CD36)) +
+     stat_qq() + 
+     stat_qq_line() + theme_minimal()
+```
+
+Z powyższego wykresu nie możemy bezpośrednio odczytać średniej, ani
+wariancji. Jesteśmy natomiast w stanie zauważyć, że mediana ekspresji CD36 w analizowanej tkance jest większa od 0
+
+## Podpunkt b
+
+```{r}
+library(nortest)
+ad.test(train_y$CD36)
+ad.test(train_y$CD36)
+```
+
+H0: zmienne pochodzą z rozkładu normalnego\
+H1: zmienne nie pochodzą z rozkładu normalnego\
+Zdecydowałem o użyciu testu Andersona-Darlinga, jako testu weryfikującego normalność rozkładu, ze względu na dużą
+liczebność próbki. Zgodnie z przewidywaniami p-wartość pozwala na
+odrzucenie hipotezy zerowej. Sytuacja taka jest naturalnym wynikiem
+testowania próbki o tak dużej liczebności z tyloma obserwacjami
+zerowymi.
+
+## Podpunkt c
+
+```{r}
+colnames(not_y)[which.max(abs(corelaction))]
+#Zmienna najbardziej skorelowana z CD36 jest BLVRB
+hist(train_x$BLVRB)
+```
+
+Histogram zmiennej BLVRB wskazuje, że zmienna może pochodzić z rozkładu wykładniczego. Ze względu na znaczną liczebność próbki jestem przekonany, że każdy test da p-value <2.2e-16 jednak, aby to potwierdzić wykonam kilka obliczeń
+
+Wyestymuję wartość parametru lambda funkcją eexp z pakietu EnvStats
+metodą największej wiarygodności
+
+```{r}
+library(EnvStats)
+eexp(train_x$BLVRB, 'mle', ci=T, conf.level = 0.99)
+```
+
+Wykonam test Kołmogorova-Smirnova dla rozkładu wykładniczego z
+wyestymowanym parametrem lambda na poziomie istotności 0.01. Test ten jest testem nieparametrycznym, a więc można go zastosować do sprawdzenia zgodności z różnymi rozkładami
+
+H0: Zmienna TFRC pochodzi z rozkładu wykładniczego o parametrze
+1.146319\
+H1: Zmienna TFRC nie pochodzi z rozkładu wykładniczego o parametrze
+1.146319\
+
+```{r}
+ks.test(train_x$BLVRB, 'pexp', 1.146319)
+```
+
+Wniosek: Na poziomie istotności 0.01 nie możemy odrzucić hipotezy
+zerowej.
+
+Również testem Kołmogorova-Smirnova sprawdzę, czy zmienna BLVRB ma
+podobny rozkład w zbiorze testowym i treningowym na poziomie istotności 0.01. Wybrałem test Kołmogorova-Smirnowa, ponieważ jest testem nieparametrycznym i dobrze poradzi sobie z tak różnolicznymi próbami oraz faktem, że w zbiorach jest więcej mierzonych parametrów niż obserwacji (tzw. "small n large p problem").
+
+H0: Zmienna BLVRB ze zbioru testowego i treningowego pochodzi z tego samego rozkładu\
+H1: Zmienna BLVRB ze zbioru testowego i treningowego nie pochodzi z tego samego rozkładu
+
+```{r}
+ks.test(train_x$BLVRB , test_x$BLVRB )
+```
+
+Na poziomie istotności 0.01 możemy stwierdzić, że zmienne w zbiorze
+testowym i treningowym pochodzą z tego samego rozkładu. Jest to bardzo ważna informacja, szczególnie jeśli zbiory te różnią się liczebnością
+
+# Zadanie 3
+
+## Podpunkt a
+
+ElasticNet to model regresji liniowej, który łączy cechy regresji
+grzbietowej (Ridge Regression) i regresji lasso (Least Absolute
+Shrinkage and Selection Operator, Lasso). Jest to metoda regularyzacji,
+która pomaga w radzeniu sobie z problemami nadmiernego dopasowania
+(overfitting) i wielokolinearności zmiennych w modelach regresji
+liniowej. Co więcej, dzięki zastosowaniu podwójnej penalizacji nie jest
+wrażliwa na obserwacje nic nie wnoszące do modelu.
+
+Wytrenowanie modelu ElasticNet polega na minimalizacji funkcji:
+
+W modelu ElasticNet estymowane są parametry beta, które określają wpływ
+poszczególnych predyktorów na wartość zmiennej objaśnianej.
+
+Parametry występującego w modelu ElasticNet to alfa i lambda. Parametr
+alfa określa wpływ regulacji konkretnych typów (L1 lub L2) na model.
+Jeśli wynosi on 0 to model redukuje się do regresji grzbietowej, natomiast
+gdy wynosi 1 model jest równoważny z regresją LASSO.\
+Parametr lambda określa wartość kary jaka nakładana jest na poszczególne
+składowe regresji. Dzięki tym parametrom możemy lepiej dopasowywać
+krzywą do wartości w naszym modelu.
+
+W przypadku trenonowania modelu ElasticNet oraz lasów losowych zdecydowano się na 4-krotną walidację. Jako, że spora część zmiennej objaśnianej (27%) ma wartość zerową chciałem zadbać o to, aby w każdym foldzie znajdowało się wystarczająco dużo wartości niezerowych. Gdybym miał odróżnić komórki z i bez ekspresji CD36 zdecydowałbym się na więcej foldów (klasyfikacja), jednak konieczność estymacji ekspresji białka CD36 (regresja) wymusza branie pod uwagę, aby w foldach nie było zbyt dużo wartości zerowych.
+
+## Podpunkt b
+
+```{r}
+library(glmnet)
+
+X <- as.matrix(train_x)
+y <- train_y$CD36
+
+num_rows <- nrow(train_x)
+num_subsets <- 4
+subset_size <- num_rows / num_subsets
+indices <- sample(1:num_rows)
+subsets <- split(indices, rep(1:num_subsets, each = subset_size))
+alphas <- seq(0,1,by=0.2)
+
+train_model <- function(train_indices, test_indices, alpha) {
+  X_train <- X[train_indices, ]
+  y_train <- y[train_indices]
+  X_test <- X[test_indices, ]
+  y_test <- y[test_indices]
+  
+  cv_fit <- cv.glmnet(X_train, y_train, alpha = alpha, nfolds = 4)
+  
+  predictions <- predict(cv_fit, X_test, s = "lambda.min")
+  train_predictions <- predict(cv_fit, X_train, s = "lambda.min")
+  
+  test_mse <- mean((predictions - y_test)^2, na.rm = TRUE)
+  train_mse <- mean((train_predictions - y_train)^2, na.rm = TRUE)
+  
+  list(cv_fit = cv_fit, predictions = predictions, test_indices = test_indices, 
+       test_mse = test_mse, train_mse = train_mse, alpha = alpha)
+}
+
+results <- list()
+result_counter <- 1
+for (i in 1:num_subsets) {
+  test_indices <- subsets[[i]]
+  train_indices <- unlist(subsets[-i])
+  for (alpha in alphas) {
+    results[[result_counter]] <- train_model(train_indices, test_indices, alpha)
+    result_counter <- result_counter + 1
+  }
+}
+
+mse_values <- list()
+test_mse_list <- numeric(length(results))
+train_mse_list <- numeric(length(results))
+
+for (i in 1:length(results)) {
+  cv_fit <- results[[i]]$cv_fit
+  mse_fold <- cv_fit$cvm 
+  lambdas_fold <- cv_fit$lambda.min 
+  mse_data <- data.frame(
+    lambda = lambdas_fold,
+    mse = mse_fold,
+    fold = rep((i - 1) %/% length(alphas) + 1, length(mse_fold)),
+    alpha = rep(results[[i]]$alpha, length(mse_fold))
+  )
+  mse_values[[i]] <- mse_data
+  
+  test_mse_list[i] <- results[[i]]$test_mse
+  train_mse_list[i] <- results[[i]]$train_mse
+}
+
+mse_df <- do.call(rbind, mse_values)
+
+```
+
+## Podpunkt c
+
+```{r}
+for (alpha in alphas) {
+  alpha_df <- subset(mse_df, alpha == alpha)
+  
+  p <- ggplot(alpha_df, aes(x = fold , y = mse, color=as.factor(fold))) +
+    geom_violin(trim = FALSE) +
+    geom_jitter(width = 0.2, size = 1.5, alpha = 0.7) +
+    labs(
+      title = paste("MSE dla alfa =", alpha),
+      x = "Fold",
+      y = "MSE"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5),
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    )
+  
+  print(p)
+}
+```
+
+## Podpunkt d
+
+```{r}
+best_index <- which.min(test_mse_list)
+best_alpha <- results[[best_index]]$alpha
+best_lambda <- results[[best_index]]$cv_fit$lambda.min
+best_train_mse <- train_mse_list[best_index]
+best_test_mse <- test_mse_list[best_index]
+
+cat("Najlepsza kombinacja hiperparametrów:\n")
+cat("Alpha:", best_alpha, "\n")
+cat("Lambda:", best_lambda, "\n")
+cat("Średni błąd treningowy:", best_train_mse, "\n")
+cat("Średni błąd walidacyjny:", best_test_mse, "\n")
+```
+
+# Zadanie 4
+
+## Podpunkt a
+Do budowy lasu losowego zdecydowałem się wykorzystać trzy hiperparametry:\
+
+### 1. mtry - Liczba zmiennych rozważanych przy każdym podziale
+Zdecydowano się na wartości 60 i 90. Wartość 90 to w przybliżeniu pierwiastek z liczby zmiennych, która dobrze sprawdzi się w przypadku, kiedy dane będą dobrze separowalne liniowo i przypadek ten będzie bardziej regresją, niż klasyfikacją
+Wartość 60 będzie wskazywała, że przypadek jest jednak bardziej problemem klasyfikacyjnym.
+
+### 2. ntree - Liczba drzew w lesie
+Im większy parametr ntree tym możliwa większa stabilność modelu. W naszym przypadku bardzo dużych danych zdecydowano się na wybór względnie dużych wartości (200 i 300).
+
+### 3. nodesize - Minimalna liczba próbek w węźle
+W przypadku dużych modeli mały parametr nodesize szczególnie mocno może prowadzić do przetrenowania. Z tego powodu zdecydowano się na wybór hiperparametrów tj. 5 i 10, dzięki czemu unikniemy małych węzłów i zwiększymy plastyczność modelu.
+```{r}
+library(randomForest)
+tune_grid <- expand.grid(
+  mtry = c(60, 90),
+  ntree = c(200, 300),
+  nodesize = c(5, 10)
+)
+
+train_rf_model <- function(train_indices, test_indices, tune_grid) {
+  X_train <- X[train_indices, ]
+  y_train <- y[train_indices]
+  X_test <- X[test_indices, ]
+  y_test <- y[test_indices]
+  
+  results <- list()
+  
+  for (i in 1:nrow(tune_grid)) {
+    params <- tune_grid[i, ]
+    
+    rf_model <- randomForest(
+      x = X_train, y = y_train,
+      mtry = params$mtry,
+      ntree = params$ntree,
+      nodesize = params$nodesize
+    )
+    
+    predictions <- predict(rf_model, X_test)
+    mse <- mean((y_test - predictions)^2)
+    
+    train_predictions <- predict(rf_model, X_train)
+    train_mse <- mean((y_train - train_predictions)^2)
+    
+    result <- list(
+      mtry = params$mtry,
+      ntree = params$ntree,
+      nodesize = params$nodesize,
+      mse = mse,
+      train_mse = train_mse
+    )
+    
+    results[[i]] <- result
+  }
+  
+  return(results)
+}
+results_rf <- list()
+
+for (i in 1:num_subsets) {
+  test_indices <- subsets[[i]]
+  train_indices <- unlist(subsets[-i])
+  
+  result <- train_rf_model(train_indices, test_indices, tune_grid)
+  results_rf[[i]] <- result
+  cat('Wytrenowano drzewo nr', i, '\n')
+}
+
+mse_values <- data.frame()
+
+for (i in 1:length(results_rf)) {
+  fold_results <- results_rf[[i]]
+  
+  for (j in 1:length(fold_results)) {
+    mse_data <- data.frame(
+      mtry = fold_results[[j]]$mtry,
+      ntree = fold_results[[j]]$ntree,
+      nodesize = fold_results[[j]]$nodesize,
+      mse = fold_results[[j]]$mse,
+      train_mse = fold_results[[j]]$train_mse,
+      fold = i
+    )
+    mse_values <- rbind(mse_values, mse_data)
+  }
+}
+
+mse_values$combination <- with(mse_values, paste(mtry, ntree, nodesize, sep = "-"))
+
+```
+
+## Podpunkt b
+
+```{r}
+# Tworzenie wykresu skrzypcowego
+p <- ggplot(mse_values, aes(x = combination, y = mse, color = as.factor(combination))) +
+  labs(
+    title = "Błędy średniokwadratowe (MSE) w poszczególnych foldach walidacji krzyżowej",
+    x = "Kombinacje hiperparametrów (mtry-ntree-nodesize)",
+    y = "Błąd średniokwadratowy (MSE)",
+    fill = "Fold"
+  ) + 
+  geom_violin(trim = FALSE) + 
+  geom_jitter(width = 0.2, size = 1.5, alpha = 0.7) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+print(p)
+```
+
+## Podpunkt c
+
+```{r}
+best_combination <- mse_values %>%
+  group_by(combination) %>%
+  summarise(mean_mse = mean(mse)) %>%
+  arrange(mean_mse) %>%
+  slice(1) %>%
+  pull(combination)
+
+best_results <- mse_values[mse_values$combination == best_combination, ]
+
+mean_train_mse <- mean(best_results$train_mse)
+mean_test_mse <- mean(best_results$mse)
+
+cat("Najlepsza kombinacja hiperparametrów: ", best_combination, "\n")
+cat("Średni błąd treningowy: ", mean_train_mse, "\n")
+cat("Średni błąd walidacyjny: ", mean_test_mse, "\n")
+```
+
+# Zadanie 5
+```{r}
+calculate_baseline_model <- function(train_indices, test_indices) {
+  y_train <- y[train_indices]
+  y_test <- y[test_indices]
+  
+  baseline_prediction_train <- mean(y_train)
+  baseline_prediction_test <- baseline_prediction_train
+  
+  train_mse <- mean((y_train - baseline_prediction_train)^2)
+  test_mse <- mean((y_test - baseline_prediction_test)^2)
+  
+  return(list(train_mse = train_mse, test_mse = test_mse))
+}
+
+baseline_errors <- data.frame(fold = integer(), train_mse = numeric(), test_mse = numeric())
+
+for (i in 1:num_subsets) {
+  test_indices <- subsets[[i]]
+  train_indices <- unlist(subsets[-i])
+  
+  baseline_error <- calculate_baseline_model(train_indices, test_indices)
+  baseline_errors <- rbind(baseline_errors, data.frame(fold = i, train_mse = baseline_error$train_mse, test_mse = baseline_error$test_mse))
+}
+
+mean_train_mse <- mean(baseline_errors$train_mse)
+mean_test_mse <- mean(baseline_errors$test_mse)
+
+cat("Średni błąd treningowy (MSE) modelu referencyjnego:", mean_train_mse, "\n")
+cat("Średni błąd walidacyjny (MSE) modelu referencyjnego:", mean_test_mse, "\n")
+
+```
+Model          | Średni błąd treningowy | Średni błąd walidacyjny
+---------------|------------------------|------------------------
+ElasticNet     |      0.1368754         |      0.1804365
+RandomForest   |      0.03490812        |      0.2134529
+Referencyjny   |      0.03490812        |      1.291873
+
+# Komentarz do zadania 5
+
+Oba wytrenowane modele osiągają o wiele lepsze wyniki niż model referencyjny. W przypadku modelu lasów losowych doszło najprawdopodobniej do przetrenowania, przez co błąd walidacyjny jest większy niż w modelu ElasticNet. Model ElasticNet lepiej poradził sobie z dużą liczbą danych, z których tak naprawdę niewiele miało realny wpływ na poziom białka CD36. Jakkolwiek biologia ekspresji genów jest skomplikowana tak jednak można być pewnym, że znaczna część pomiarów nie wnosiła dużo informacji o modelu. Ten aspekt jest możliwym powodem złego wytrenowania lasów losowych. W drzewach było zbyt mało cech, które były znaczące, przez co cechy nieznaczące były odbierane jako istotne (tzw. przetrenowanie wynikające z modelowania szumu, które było poruszane na wykładzie). Model ElasticNet może nie brać pod uwagę nieznaczące obserwacje, dzięki regulacji L1, która związana jest z regresją LASSO. Argument, który przemawia, ku temu jest taki, że najlepsza wyestymowana alfa wynosi 0.8, a więc jest znacznie bliższa do 1, która odpowiada regresji LASSO.
+
